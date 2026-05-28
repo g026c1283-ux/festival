@@ -9,7 +9,7 @@
  */
 window.APP_CONFIG = {
   // バックエンドAPIのURL
-  apiUrl: 'https://script.google.com/a/macros/g.neec.ac.jp/s/AKfycbzQkxa6SBhmIegtEhABnPpDfbhtCzUJkz7wOqXtzpoethz49zxCo8a2J-kPgk23U7u6/exec',
+  apiUrl: 'https://script.google.com/macros/s/AKfycbzUS12ZIbknFPImpCJR6FhELGoA2bxikeqUq4ntlKMrIBjlE9t5qNOmh8fZg1tnROoW/exec',
 
   // 種目名 (受付フォームの選択肢と完全一致させること)
   events: [
