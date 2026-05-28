@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>体育祭 順番待ち | 大型モニタ表示</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="display-page">
+  <header class="app-header">
+    <div class="title">
+      <span class="main">体育祭 順番待ち</span>
+      <span class="sub">受付状況モニタ</span>
+    </div>
+  </header>
+
+  <div id="alert-area"></div>
+
+  <main id="board" class="events-grid"></main>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+  <script>
+    (function () {
+      const $ = function (s) { return document.querySelector(s); };
+      const board = $('#board');
+
+      function setStatus() {} // ステータス表示なし
+
+      function renderEventCard(ev, bucket) {
+        const minutes = APP.Storage.getMinutesPerPerson();
+        const waiting = bucket.waiting;
+        const calling = bucket.calling;
+        const waitCount = waiting.length;
+        const waitMin = waitCount * minutes;
+
+        const callingHtml = calling
+          ? '<div class="now-calling">' +
+              '<div class="label">ただいま呼出中</div>' +
+              '<div class="number">No.' + APP.escapeHtml(calling.queueNumber) + '</div>' +
+              '<div class="name">' + APP.escapeHtml(calling.name || '(名前未登録)') + '</div>' +
+              '<div class="meta">' + APP.escapeHtml(calling.studentId || '') + '</div>' +
+            '</div>'
+          : '<div class="now-calling is-empty">' +
+              '<div class="label">ただいま呼出中</div>' +
+              '<div class="number">―</div>' +
+              '<div class="meta">' + (waiting.length ? '次の方をお待ちください' : '受付お待ちしています') + '</div>' +
+            '</div>';
+
+        const upcomingHtml = waiting.length
+          ? waiting.slice(0, APP.config.upcomingCount).map(function (e, i) {
+              const wMin = (i + 1) * minutes;
+              return '<li>' +
+                '<span class="pos">' + APP.escapeHtml(e.queueNumber) + '</span>' +
+                '<span class="nm">' + APP.escapeHtml(e.name || '(名前未登録)') + '</span>' +
+                '<span class="wait">約 ' + wMin + ' 分後</span>' +
+              '</li>';
+            }).join('')
+          : '<li class="is-empty">現在、待ちの方はいません</li>';
+
+        return '' +
+          '<section class="event-card">' +
+            '<div class="event-header" style="background: linear-gradient(135deg, ' + ev.color + ' 0%, ' + ev.accent + ' 100%);">' +
+              '<div class="ev-name">' + APP.escapeHtml(ev.name) + '</div>' +
+              '<div class="ev-sub">本日の順番待ち状況</div>' +
+            '</div>' +
+            callingHtml +
+            '<div class="stats-row">' +
+              '<div class="stat"><div class="label">待ち人数</div><div class="value">' + waitCount + '<span class="unit">人</span></div></div>' +
+              '<div class="stat"><div class="label">推定待ち時間</div><div class="value">' + waitMin + '<span class="unit">分</span></div></div>' +
+            '</div>' +
+            '<div class="upcoming">' +
+              '<div class="upcoming-title">次に呼ばれる方</div>' +
+              '<ul class="upcoming-list">' + upcomingHtml + '</ul>' +
+            '</div>' +
+          '</section>';
+      }
+
+      function render(entries) {
+        const queues = APP.buildQueues(entries);
+        const html = (APP.config.events || []).map(function (ev) {
+          const b = queues[ev.name] || { waiting: [], calling: null, all: [] };
+          return renderEventCard(ev, b);
+        }).join('');
+        board.innerHTML = html;
+      }
+
+      if (!APP.Api.isConfigured()) {
+        APP.renderConfigAlertIfNeeded('#alert-area');
+        setStatus('未設定', 'is-error');
+        return;
+      }
+
+      // 変更検知付きウォッチャー (変化があった時だけ画面更新)
+      var connected = false;
+      APP.startWatcher({
+        onChange: function (res) { render(res.entries || []); },
+        onTick: function (info) {
+          if (info.phase === 'changed') {
+            connected = true;
+            setStatus('更新しました', '');
+            setTimeout(function () { setStatus('接続中', ''); }, 2000);
+          } else if (info.phase === 'unchanged') {
+            if (!connected) setStatus('接続中', '');
+            connected = true;
+          } else if (info.phase === 'error') {
+            setStatus('接続エラー', 'is-error');
+            connected = false;
+          } else if (info.phase === 'start' && !connected) {
+            setStatus('接続中…', 'is-loading');
+          }
+        }
+      });
+
+      // 隠しコマンド: a を3回押すと admin へ
+      APP.initHiddenAdminAccess();
+    })();
+  </script>
+</body>
+</html>

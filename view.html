@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>体育祭 順番待ち | 受付確認</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="view-page">
+  <header class="view-header">
+    <div class="title">
+      <span class="main">体育祭 順番待ち</span>
+      <span class="sub">受付確認</span>
+    </div>
+    <span id="status" class="status-pill is-loading">…</span>
+  </header>
+
+  <main class="view-main">
+    <div id="alert-area"></div>
+
+    <!-- 識別フォーム -->
+    <section id="identity-section" class="view-card">
+      <h2 class="view-card-title">あなたの情報を入力</h2>
+      <p class="view-card-desc">フォームで送信した <strong>学籍番号</strong> または <strong>お名前</strong> を入力すると、待ち状況が表示されます。</p>
+      <form id="identity-form" class="identity-form">
+        <label>
+          <span>学籍番号</span>
+          <input id="input-student-id" type="text" autocomplete="off" placeholder="例: S001">
+        </label>
+        <label>
+          <span>または お名前</span>
+          <input id="input-name" type="text" autocomplete="off" placeholder="例: 山田 太郎">
+        </label>
+        <button type="submit" class="btn-view-primary">確認する</button>
+      </form>
+    </section>
+
+    <!-- 本人状況カード (識別後に表示) -->
+    <section id="my-status-section" class="view-card hidden">
+      <div class="my-status-banner">
+        <div class="banner-label">📋 受付スタッフに見せてください</div>
+      </div>
+
+      <div id="my-identity" class="my-identity"></div>
+      <div id="my-entries" class="my-entries"></div>
+
+      <a href="form.html?new=1" class="btn-view-secondary" style="text-align:center; text-decoration:none; display:block">別の種目を受付する</a>
+    </section>
+
+    <!-- 全体状況 -->
+    <section id="overall-section" class="view-card">
+      <h2 class="view-card-title">全体の状況</h2>
+      <div id="overall-board" class="overall-board"></div>
+    </section>
+
+    <footer class="view-footer">
+      <p>このページは自動で更新されます</p>
+    </footer>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+  <script>
+    (function () {
+      const $ = function (s) { return document.querySelector(s); };
+      const statusEl = $('#status');
+      const idSection = $('#identity-section');
+      const myStatusSection = $('#my-status-section');
+      const inputSid = $('#input-student-id');
+      const inputName = $('#input-name');
+      const myIdentityEl = $('#my-identity');
+      const myEntriesEl = $('#my-entries');
+      const overallBoard = $('#overall-board');
+
+      let latestEntries = [];
+
+      function setStatus(text, cls) {
+        statusEl.textContent = text;
+        statusEl.className = 'status-pill ' + (cls || '');
+      }
+
+      function statusBadge(s) {
+        if (s === '呼出中')   return { txt: '🔔 呼出中！', cls: 'badge-calling' };
+        if (s === '完了')     return { txt: '✅ 完了',     cls: 'badge-done' };
+        if (s === 'キャンセル') return { txt: 'キャンセル', cls: 'badge-canceled' };
+        return { txt: '⏳ 待機中', cls: 'badge-waiting' };
+      }
+
+      function renderMyEntries(identity, entries) {
+        const minutes = APP.Storage.getMinutesPerPerson();
+        const allMine = APP.findEntriesByIdentity(entries, identity);
+        // 完了・キャンセルを除外: 待機中・呼出中のみ表示
+        const mine = allMine.filter(function (e) {
+          return e.status !== '完了' && e.status !== 'キャンセル';
+        });
+
+        // 識別ヘッダー
+        const idLabel =
+          (identity.name ? '<div class="my-name">' + APP.escapeHtml(identity.name) + '</div>' : '') +
+          (identity.studentId ? '<div class="my-sid">学籍番号: ' + APP.escapeHtml(identity.studentId) + '</div>' : '');
+        myIdentityEl.innerHTML = idLabel || '<div class="my-name">' + APP.escapeHtml(identity.name || identity.studentId || '') + '</div>';
+
+        if (mine.length === 0) {
+          // 受付がない or 全て完了済み
+          var emptyMsg = allMine.length > 0
+            ? '受付済みの種目はすべて完了しました。'
+            : 'まだ受付されていないようです。';
+          myEntriesEl.innerHTML =
+            '<div class="my-entry-empty">' +
+              emptyMsg + '<br>' +
+              '<a href="form.html?new=1" class="btn-view-primary" style="display:inline-block; margin-top:14px; text-decoration:none">新しく受付する</a>' +
+            '</div>';
+          return;
+        }
+
+        // 種目ごとに整理 (待ち番号を計算するため)
+        const queues = APP.buildQueues(entries);
+        const cards = mine.map(function (myEntry) {
+          const ev = (APP.config.events || []).find(function (e) { return e.name === myEntry.event; })
+                    || { color: '#475569', accent: '#64748b', name: myEntry.event };
+          const bucket = queues[myEntry.event];
+          let posInWait = -1;
+          if (bucket) {
+            posInWait = bucket.waiting.findIndex(function (e) { return e.row === myEntry.row; });
+          }
+          const badge = statusBadge(myEntry.status);
+
+          let mainBig = '';
+          if (myEntry.status === '呼出中') {
+            mainBig =
+              '<div class="my-big-msg my-big-call">いま呼ばれています！</div>' +
+              '<div class="my-big-sub">受付場所へ向かってください</div>';
+          } else {
+            // 待機中
+            const aheadCount = posInWait >= 0 ? posInWait : 0; // 自分の前に何人
+            const myWaitMin = (aheadCount + 1) * minutes; // 自分が呼ばれるまで
+            mainBig =
+              '<div class="my-big-num">あと ' + aheadCount + ' 人</div>' +
+              '<div class="my-big-sub">推定 約 ' + myWaitMin + ' 分後</div>';
+          }
+
+          return '' +
+            '<div class="my-entry-card" style="--ev-color:' + ev.color + ';--ev-accent:' + ev.accent + ';">' +
+              '<div class="my-entry-header">' +
+                '<span class="my-entry-event">' + APP.escapeHtml(myEntry.event) + '</span>' +
+                '<span class="my-entry-num">No.' + APP.escapeHtml(myEntry.queueNumber) + '</span>' +
+              '</div>' +
+              '<div class="my-entry-badge ' + badge.cls + '">' + badge.txt + '</div>' +
+              mainBig +
+            '</div>';
+        }).join('');
+        myEntriesEl.innerHTML = cards;
+      }
+
+      function renderOverall(entries) {
+        const minutes = APP.Storage.getMinutesPerPerson();
+        const queues = APP.buildQueues(entries);
+        const html = (APP.config.events || []).map(function (ev) {
+          const b = queues[ev.name] || { waiting: [], calling: null };
+          const calling = b.calling
+            ? '<div class="ov-calling">呼出中: <strong>No.' + APP.escapeHtml(b.calling.queueNumber) + ' ' + APP.escapeHtml(b.calling.name || '') + '</strong></div>'
+            : '<div class="ov-calling ov-empty">呼出中: ―</div>';
+          return '' +
+            '<div class="ov-card" style="--ev-color:' + ev.color + ';--ev-accent:' + ev.accent + ';">' +
+              '<div class="ov-name">' + APP.escapeHtml(ev.name) + '</div>' +
+              calling +
+              '<div class="ov-stats">' +
+                '<div class="ov-stat"><span class="ov-num">' + b.waiting.length + '</span><span class="ov-unit">人待ち</span></div>' +
+                '<div class="ov-stat"><span class="ov-num">' + (b.waiting.length * minutes) + '</span><span class="ov-unit">分</span></div>' +
+              '</div>' +
+            '</div>';
+        }).join('');
+        overallBoard.innerHTML = html;
+      }
+
+      function refreshUI() {
+        const identity = APP.Storage.getIdentity();
+        if (identity && (identity.name || identity.studentId)) {
+          idSection.classList.add('hidden');
+          myStatusSection.classList.remove('hidden');
+          renderMyEntries(identity, latestEntries);
+        } else {
+          idSection.classList.remove('hidden');
+          myStatusSection.classList.add('hidden');
+        }
+        renderOverall(latestEntries);
+      }
+
+      // 識別フォーム
+      $('#identity-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        const sid = inputSid.value.trim();
+        const nm = inputName.value.trim();
+        if (!sid && !nm) {
+          alert('学籍番号またはお名前を入力してください');
+          return;
+        }
+        APP.Storage.setIdentity({ studentId: sid, name: nm });
+        refreshUI();
+      });
+
+      $('#change-identity-btn').addEventListener('click', function () {
+        APP.Storage.setIdentity(null);
+        inputSid.value = '';
+        inputName.value = '';
+        refreshUI();
+      });
+
+      // 起動時: URLパラメータ or localStorage から識別情報を復元
+      var params = new URLSearchParams(location.search);
+      var paramSid = params.get('sid') || '';
+      var paramName = params.get('name') || '';
+      var hasIdentity = false;
+
+      if (paramSid || paramName) {
+        // URLパラメータあり → 保存して即表示
+        var identity = { studentId: paramSid, name: paramName };
+        APP.Storage.setIdentity(identity);
+        if (paramSid) inputSid.value = paramSid;
+        if (paramName) inputName.value = paramName;
+        hasIdentity = true;
+        // URLからパラメータを消す（見た目をクリーンに）
+        if (history.replaceState) {
+          history.replaceState(null, '', location.pathname);
+        }
+      } else {
+        // localStorage から復元
+        var savedIdentity = APP.Storage.getIdentity();
+        if (savedIdentity && (savedIdentity.studentId || savedIdentity.name)) {
+          if (savedIdentity.studentId) inputSid.value = savedIdentity.studentId;
+          if (savedIdentity.name) inputName.value = savedIdentity.name;
+          hasIdentity = true;
+        }
+      }
+
+      // 識別情報がある場合は即座に入力画面を隠してステータス画面を表示
+      if (hasIdentity) {
+        idSection.classList.add('hidden');
+        myStatusSection.classList.remove('hidden');
+        // データ読込中の仮表示
+        myEntriesEl.innerHTML = '<div class="my-entry-empty">データを読み込み中…</div>';
+      }
+
+      // データ取得開始
+      if (!APP.Api.isConfigured()) {
+        APP.renderConfigAlertIfNeeded('#alert-area');
+        setStatus('未設定', 'is-error');
+        refreshUI();
+        return;
+      }
+
+      var connected = false;
+      APP.startWatcher({
+        onChange: function (res) {
+          latestEntries = res.entries || [];
+          refreshUI();
+        },
+        onTick: function (info) {
+          if (info.phase === 'changed') {
+            connected = true;
+            setStatus('更新しました', '');
+            setTimeout(function () { setStatus('接続中', ''); }, 2000);
+          } else if (info.phase === 'unchanged') {
+            if (!connected) setStatus('接続中', '');
+            connected = true;
+          } else if (info.phase === 'error') {
+            setStatus('接続エラー', 'is-error');
+            connected = false;
+          } else if (info.phase === 'start' && !connected) {
+            setStatus('接続中…', 'is-loading');
+          }
+        }
+      });
+
+    })();
+  </script>
+</body>
+</html>
